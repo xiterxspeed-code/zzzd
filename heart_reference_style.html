@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heart Particle Reveal</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
+body{display:grid;place-items:center}
+canvas{display:block;width:100vw;height:100vh}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+let W,H,DPR;
+let particles=[];
+let started=0;
+
+function resize(){
+  DPR=Math.min(devicePixelRatio||1,2);
+  W=innerWidth; H=innerHeight;
+  canvas.width=W*DPR;
+  canvas.height=H*DPR;
+  canvas.style.width=W+"px";
+  canvas.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  build();
+  started=performance.now();
+}
+addEventListener("resize",resize);
+
+/*
+  قلب على شكل مسار واحد.
+  الترتيب يبدأ من أعلى المنتصف -> القوس الأيمن -> رأس القلب
+  -> القوس الأيسر -> العودة إلى أعلى المنتصف.
+*/
+function heart(t, inset){
+  const x = 16*Math.pow(Math.sin(t),3);
+  const y = -(13*Math.cos(t)-5*Math.cos(2*t)
+            -2*Math.cos(3*t)-Math.cos(4*t));
+
+  // ضغط بسيط للمسارات الداخلية حتى تعطي نفس كثافة الصورة
+  return {
+    x:x*inset,
+    y:y*inset
+  };
+}
+
+function build(){
+  particles=[];
+
+  const cx=W/2;
+  const cy=H/2;
+  const scale=Math.min(W,H)/42;
+
+  // عدة خطوط متوازية، كما في الصورة
+  const lines=13;
+  const count=260;
+
+  for(let layer=0; layer<lines; layer++){
+    const inset=0.63 + layer*0.028;
+
+    for(let i=0;i<count;i++){
+      // t=0 يبدأ من أعلى القلب.
+      // نكمل حول القلب في اتجاه واحد حتى نعود للأعلى.
+      const t=(Math.PI*2*i)/count;
+      const p=heart(t,inset);
+
+      particles.push({
+        x:cx+p.x*scale,
+        y:cy+p.y*scale,
+        layer,
+        order:i,
+        r:0.62+Math.random()*0.75,
+        alpha:0.34+Math.random()*0.48,
+        phase:Math.random()*Math.PI*2
+      });
+    }
+  }
+
+  /*
+    نريد "من الأعلى ثم ينزل" وليس ظهور كل القلب مرة واحدة.
+    نعطي المسار الرئيسي توقيتاً متدرجاً، مع فرق بسيط بين
+    الخطوط الداخلية ليبدو كأنه ضوء/نقاط تُرسم في الهواء.
+  */
+  for(const p of particles){
+    const directionProgress=p.order/(count-1);
+
+    // البداية بطيئة، ثم انسيابية، ثم اكتمال هادئ
+    p.delay = directionProgress*6200
+            + p.layer*18
+            + Math.random()*28;
+
+    // مرحلة الكشف من 0 إلى 1
+    p.duration=145;
+  }
+}
+
+function ease(t){
+  return 1-Math.pow(1-t,3);
+}
+
+function draw(now){
+  ctx.clearRect(0,0,W,H);
+
+  const elapsed=now-started;
+
+  // هالة خافتة جدًا حول منطقة القلب
+  const g=ctx.createRadialGradient(
+    W/2,H/2,0,
+    W/2,H/2,Math.min(W,H)*.43
+  );
+  g.addColorStop(0,"rgba(170,170,170,.035)");
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+
+  let active=null;
+  let best=-1;
+
+  for(const p of particles){
+    const raw=(elapsed-p.delay)/p.duration;
+    if(raw<=0) continue;
+
+    const q=Math.min(raw,1);
+    const e=ease(q);
+
+    // نقطة تظهر من لا شيء ثم تستقر
+    const radius=p.r*(0.25+0.75*e);
+
+    ctx.save();
+    ctx.globalAlpha=p.alpha*e;
+    ctx.fillStyle="#a9a9a9";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,radius,0,Math.PI*2);
+    ctx.fill();
+
+    // لمعان خفيف جدًا لحظة ولادة النقطة
+    if(q<1){
+      ctx.globalAlpha=p.alpha*(1-q)*0.30;
+      ctx.shadowColor="#d0d0d0";
+      ctx.shadowBlur=7;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,radius*2.7,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    if(raw<1 && p.delay>best){
+      best=p.delay;
+      active=p;
+    }
+  }
+
+  // رأس الرسم المتحرك
+  if(active){
+    const q=Math.max(0,Math.min(1,(elapsed-active.delay)/active.duration));
+    ctx.save();
+    ctx.globalAlpha=.95;
+    ctx.fillStyle="#dedede";
+    ctx.shadowColor="rgba(220,220,220,.75)";
+    ctx.shadowBlur=12;
+    ctx.beginPath();
+    ctx.arc(active.x,active.y,2.0+1.2*(1-q),0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+// إعادة التشغيل بالنقر
+canvas.addEventListener("click",()=>{
+  started=performance.now();
+});
+
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
